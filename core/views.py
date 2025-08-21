@@ -24,6 +24,33 @@ def get_or_create_conversation(sender_id: str):
         return Conversation.objects.get(sender_id=sender_id)
     except Conversation.DoesNotExist:
         return Conversation.objects.create(sender_id=sender_id)
+    
+def add_to_history(history, msg, sender='user'):
+    attachments = msg.get("attachments", [])
+    is_text = msg.get("text") is not None
+    sticker_id = None
+    attachment_type = ""
+
+    for attachment in attachments:
+        attachment_type = attachment.get("type")
+        sticker_id = attachment.get("payload", {}).get("sticker_id")
+
+    if is_text or sticker_id or attachment_type:
+        # Determine user message content
+        if sticker_id and sticker_id == 369239263222822:
+            user_text = "<thumbsup sticker>"
+        elif is_text:
+            user_text = f'{msg["text"]}'
+        else:
+            user_text = f'user sent an "{attachment_type}"'
+
+        # Add user message to history
+        history.append({"role": "user", "content": user_text})
+        logger.info(f"User {sender}: {user_text}")
+
+        return history
+    # failed
+    return False
 
 def send_text(recipient_id: str, message: dict):
     """Send a message via Facebook Messenger API"""
@@ -35,7 +62,8 @@ def send_text(recipient_id: str, message: dict):
         return True
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to send message to {recipient_id}: {e}")
-        return False
+    return False
+
 
 def send_action(recipient_id: str, action: str):
     """Send sender actions like typing indicators"""
@@ -47,7 +75,7 @@ def send_action(recipient_id: str, action: str):
         return True
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to send action {action} to {recipient_id}: {e}")
-        return False
+    return False
 
 def verify_signature(request) -> bool:
     """Verify Facebook webhook signature for security"""
@@ -125,80 +153,60 @@ def webhook_view(request):
 
     try:
         data = json.loads(request.body.decode("utf-8"))
-        print(data)
     except json.JSONDecodeError:
         logger.error("Invalid JSON in webhook request")
         return HttpResponseForbidden("Invalid JSON")
 
+    breaker = False
     for entry in data.get("entry", []):
         for evt in entry.get("messaging", []):
             sender = evt.get("sender", {}).get("id")
             if not sender:
-                continue
+                break
 
-            try:
-                conversation = get_or_create_conversation(sender)
-                history = json.loads(conversation.get_history() or "[]")
+            conversation = get_or_create_conversation(sender)
+            history = json.loads(conversation.get_history() or "[]")
 
-                # Handle text messages and attachments
-                msg = evt.get("message", {})
-                attachments = msg.get("attachments", [])
+            # Handle text messages and attachments
+            msg = evt.get("message", {})
+            print('msg:', msg)
+            
+            history = add_to_history(history, msg, sender)
+            if not history and not msg:
+                breaker = True
+                break
+            # Send typing indicators
+            send_action(sender, "mark_seen")
+            send_action(sender, "typing_on")
 
-                is_text = msg.get("text") is not None
-                sticker_id = None
-                attachment_type = ""
+            # Get AI response
+            reply = ai_reply(history[-30:])  # Keep last 30 messages for context
+            print(reply)
+            
+            send_action(sender, "typing_off")
 
-                for attachment in attachments:
-                    attachment_type = attachment.get("type")
-                    sticker_id = attachment.get("payload", {}).get("sticker_id")
+            # Send responses
+            success = True
+            for r in reply:
+                if not send_text(sender, r):
+                    success = False
+                    continue
+                history.append({"role": "assistant", "content": r.get("text", str(r))})
 
-                if is_text or sticker_id or attachment_type:
-                    # Determine user message content
-                    if sticker_id and sticker_id == 369239383222814:
-                        user_text = "<thumbsup sticker>"
-                    elif is_text:
-                        user_text = msg["text"]
-                    else:
-                        user_text = f'user sent an "{attachment_type}"'
+            if success:
+                # Save conversation history
+                conversation.history = json.dumps(history)
+                conversation.save()
+            else:
+                logger.error(f"Failed to send all messages to {sender}")
 
-                    # Add user message to history
-                    history.append({"role": "user", "content": user_text})
-                    logger.info(f"User {sender}: {user_text}")
-
-                    # Send typing indicators
-                    send_action(sender, "mark_seen")
-                    send_action(sender, "typing_on")
-
-                    # Get AI response
-                    reply = ai_reply(history[-30:])  # Keep last 30 messages for context
-                    print(reply)
-                    
-                    send_action(sender, "typing_off")
-
-                    # Send responses
-                    success = True
-                    for r in reply:
-                        if not send_text(sender, r):
-                            success = False
-                            break
-                        history.append({"role": "assistant", "content": r.get("text", str(r))})
-
-                    if success:
-                        # Save conversation history
-                        conversation.history = json.dumps(history)
-                        conversation.save()
-                    else:
-                        logger.error(f"Failed to send all messages to {sender}")
-
-                # Handle postback buttons
-                postback = evt.get("postback")
-                if postback and postback.get("payload"):
-                    payload = postback["payload"]
-                    send_text(sender, {"text": f"You tapped: {payload}"})
-
-            except Exception as e:
-                logger.error(f"Error processing message from {sender}: {e}")
-                # Send error message to user
-                send_text(sender, {"text": "দুঃখিত, একটি সমস্যা হয়েছে। আমাদের সাপোর্ট টিমের সাথে যোগাযোগ করুন।"})
+            # Handle postback buttons
+            postback = evt.get("postback")
+            if postback and postback.get("payload"):
+                payload = postback["payload"]
+                send_text(sender, {"text": f"You tapped: {payload}"})
+            
+        if breaker:
+            break
 
     return JsonResponse({"status": "ok"})
