@@ -1,111 +1,148 @@
 import json
 import logging
+import os
+import hmac
+import hashlib
+import requests
+
 from django.http import HttpResponse, JsonResponse, HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+
 from google import genai
 from google.genai import types
-from .sys_prompt import get_prompt
 
 from .models import Conversation
-import requests, os, hmac, hashlib
+from .sys_prompt import get_prompt
 
-# Set up logging
+# --- Setup and Configuration ---
 logger = logging.getLogger(__name__)
 
+# --- Environment Variables ---
 PAGE_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN")
 APP_SECRET = os.getenv("FB_APP_SECRET")
 VERIFY_TOKEN = os.getenv("FB_VERIFY_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# --- Constants ---
 SEND_API_URL = "https://graph.facebook.com/v23.0/me/messages"
 
+# --- Database & History Management ---
+
 def get_or_create_conversation(sender_id: str):
+    """Retrieves or creates a conversation record for a given sender ID."""
     try:
         return Conversation.objects.get(sender_id=sender_id)
     except Conversation.DoesNotExist:
         return Conversation.objects.create(sender_id=sender_id)
-    
-def add_to_history(history, msg, sender='user'):
-    attachments = msg.get("attachments", [])
-    is_text = msg.get("text") is not None
-    sticker_id = None
-    attachment_type = ""
 
-    for attachment in attachments:
+def add_user_message_to_history(history: list, msg: dict) -> list | None:
+    """
+    Parses a user's message, adds it to the history, and returns the updated history.
+    Returns None if the message is not processable.
+    """
+    if msg.get("text"):
+        user_text = msg["text"]
+    elif msg.get("attachments"):
+        attachment = msg["attachments"][0] # Process the first attachment
         attachment_type = attachment.get("type")
-        sticker_id = attachment.get("payload", {}).get("sticker_id")
-
-    if is_text or sticker_id or attachment_type:
-        # Determine user message content
-        if sticker_id and sticker_id == 369239263222822:
-            user_text = "<thumbsup sticker>"
-        elif is_text:
-            user_text = f'{msg["text"]}'
+        payload = attachment.get("payload", {})
+        
+        if payload.get("sticker_id") == 369239263222822: # Thumbs-up sticker
+             user_text = ">thumbsup sticker"
         else:
-            user_text = f'user sent an "{attachment_type}"'
+             user_text = f'>user sent an "{attachment_type}"'
+    else:
+        return None # Not a processable message type
 
-        # Add user message to history
-        history.append({"role": "user", "content": user_text})
-        logger.info(f"User {sender}: {user_text}")
+    history.append({"role": "user", "content": user_text})
+    logger.info(f"User {history[-1]}")
+    print(f"User {history[-1]}")
+    return history
 
-        return history
-    # failed
-    return False
+def add_model_message_to_history(history: list, model_responses: list) -> list:
+    """
+    Parses the AI's JSON response and adds a clean, textual representation to the history.
+    """
+    for res_part in model_responses:
+        content = ""
+        
+        if "text" in res_part:
+            content = res_part["text"]
+        elif "attachment" in res_part:
+            attachment_type = res_part.get("attachment", {}).get("type", "attachment")
+            url = res_part.get("attachment", {}).get("payload", {}).get("url")
+            content = f'>model sent an "{attachment_type}" {url}'
+        else:
+            # Fallback for unexpected format from AI
+            content = json.dumps(res_part)
 
-def send_text(recipient_id: str, message: dict):
-    """Send a message via Facebook Messenger API"""
+        history.append({"role": "assistant", "content": content})
+        print(f"Model {history[-1]}")
+    return history
+
+
+# --- Facebook Messenger API Helpers ---
+
+def send_api_request(payload: dict) -> bool:
+    """Generic function to send a POST request to the Messenger Send API."""
     params = {"access_token": PAGE_TOKEN}
-    payload = {"recipient": {"id": recipient_id}, "message": message}
     try:
         r = requests.post(SEND_API_URL, params=params, json=payload, timeout=10)
         r.raise_for_status()
+        response_data = r.json()
+        if "error" in response_data:
+            logger.error(f"FB Send API Error: {response_data['error']}")
+            return False
         return True
     except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to send message to {recipient_id}: {e}")
-    return False
+        logger.error(f"Failed to send FB API request: {e}")
+        return False
 
+def send_message(recipient_id: str, message: dict):
+    """Sends a message object (text, attachment, quick replies) via Facebook."""
+    payload = {"recipient": {"id": recipient_id}, "message": message, "messaging_type": "RESPONSE"}
+    return send_api_request(payload)
 
 def send_action(recipient_id: str, action: str):
-    """Send sender actions like typing indicators"""
-    params = {"access_token": PAGE_TOKEN}
+    """Sends sender actions like 'typing_on' or 'mark_seen'."""
     payload = {"recipient": {"id": recipient_id}, "sender_action": action}
-    try:
-        r = requests.post(SEND_API_URL, params=params, json=payload, timeout=5)
-        r.raise_for_status()
-        return True
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to send action {action} to {recipient_id}: {e}")
-    return False
+    return send_api_request(payload)
+
+
+# --- Security ---
 
 def verify_signature(request) -> bool:
-    """Verify Facebook webhook signature for security"""
+    """Verifies the Facebook webhook signature for security."""
     if not APP_SECRET:
-        logger.warning("APP_SECRET not configured")
+        logger.error("APP_SECRET is not configured. Signature verification failed.")
         return False
         
-    sig = request.headers.get("X-Hub-Signature-256", "")
-    if not sig.startswith("sha256="):
+    sig_header = request.headers.get("X-Hub-Signature-256", "")
+    if not sig_header.startswith("sha256="):
+        logger.warning(f"Invalid signature header format: {sig_header}")
         return False
         
-    provided = sig.split("=", 1)[1]
+    provided_signature = sig_header.split("=", 1)[1]
+    
     app_secret_bytes = APP_SECRET.encode('utf-8')
-    digest = hmac.new(app_secret_bytes, request.body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(provided, digest)
+    expected_signature = hmac.new(app_secret_bytes, request.body, hashlib.sha256).hexdigest()
+    
+    return hmac.compare_digest(provided_signature, expected_signature)
 
-def ai_reply(history) -> list:
+
+# --- AI Core Logic ---
+
+def ai_reply(history: list) -> list:
     """Generate AI response using Gemini API"""
     try:
         client = genai.Client()
         
         # Convert history to proper format for Gemini
-        formatted_history = []
-        for msg in history:
-            role = "user" if msg["role"] == "user" else "model"
-            formatted_history.append({"role": role, "parts": [{"text": msg["content"]}]})
-        
+
         response = client.models.generate_content(
             model="gemini-2.5-flash",
-            contents=formatted_history,
+            contents=str(history),
             config=types.GenerateContentConfig(
                 temperature=0.8,
                 system_instruction=get_prompt(),
@@ -127,86 +164,102 @@ def ai_reply(history) -> list:
         logger.error(f"JSON decode error: {e}")
         return []
     except Exception as e:
-        logger.error(f"AI reply error: {e}")
+        logger.error(f"AI generation error: {e}")
         return []
+
+
+# --- Main Webhook Logic ---
+
+def process_event(event: dict):
+    """Handles a single messaging event from the Facebook webhook."""
+    sender_id = event.get("sender", {}).get("id")
+    if not sender_id:
+        return
+
+    conversation = get_or_create_conversation(sender_id)
+    history = json.loads(conversation.get_history() or "[]")
+    
+    user_input_received = False
+    
+    # Case 1: User sent a standard message (text, attachment)
+    if "message" in event:
+        updated_history = add_user_message_to_history(history, event["message"])
+        if updated_history:
+            history = updated_history
+            user_input_received = True
+
+    # Case 2: User clicked a postback button (from quick replies, etc.)
+    elif "postback" in event:
+        payload = event["postback"].get("payload", "")
+        title = event["postback"].get("title", payload)
+        user_text = f'user clicked: "{title}"' # Treat button click as user input
+        history.append({"role": "user", "content": user_text})
+        logger.info(f"User Postback: {user_text}")
+        user_input_received = True
+
+    if not user_input_received:
+        # Ignore events without user input (e.g., delivery receipts, read receipts)
+        return
+
+    # --- Generate and Send AI Response ---
+    send_action(sender_id, "mark_seen")
+    send_action(sender_id, "typing_on")
+
+    # Get AI response, keeping context to the last 15 turns (30 messages)
+    model_responses = ai_reply(history[-30:])
+    
+    send_action(sender_id, "typing_off")
+
+    # Send all parts of the AI's response
+    #success = all(send_message(sender_id, res_part) for res_part in model_responses)
+    success = []
+    for res_part in model_responses:
+        if not send_message(sender_id, res_part):
+            print(f"Failed to send message: {res_part}")
+            success.append(False)
+        else:
+            success.append(True)
+
+    if all(success):
+        final_history = add_model_message_to_history(history, model_responses)
+        conversation.history = json.dumps(final_history)
+        conversation.save()
+    else:
+        failed_count = success.count(False)
+        logger.error(f"Failed to send {failed_count} messages to {sender_id}")
+
 
 @require_http_methods(["GET", "POST"])
 @csrf_exempt
 def webhook_view(request):
-    # GET: verification
+    """Main webhook endpoint for Facebook Messenger."""
     if request.method == "GET":
         mode = request.GET.get("hub.mode")
         token = request.GET.get("hub.verify_token")
         challenge = request.GET.get("hub.challenge")
-        
         if mode == "subscribe" and token == VERIFY_TOKEN:
-            logger.info("Webhook verified successfully")
+            logger.info("Webhook verified successfully.")
             return HttpResponse(challenge, status=200)
-        
-        logger.warning(f"Verification failed: mode={mode}, token={token}")
+        logger.warning(f"Webhook verification failed. Mode: {mode}, Token: {token}")
         return HttpResponseForbidden("Verification failed")
 
-    # POST: events
+    # --- POST: Handle Incoming Events ---
     if not verify_signature(request):
-        logger.warning("Invalid signature in webhook request")
+        logger.warning("Invalid signature in webhook request.")
         return HttpResponseForbidden("Invalid signature")
 
     try:
         data = json.loads(request.body.decode("utf-8"))
     except json.JSONDecodeError:
-        logger.error("Invalid JSON in webhook request")
-        return HttpResponseForbidden("Invalid JSON")
+        logger.error("Invalid JSON received in webhook request body.")
+        return HttpResponse("Invalid JSON", status=400)
 
-    breaker = False
     for entry in data.get("entry", []):
-        for evt in entry.get("messaging", []):
-            sender = evt.get("sender", {}).get("id")
-            if not sender:
-                break
-
-            conversation = get_or_create_conversation(sender)
-            history = json.loads(conversation.get_history() or "[]")
-
-            # Handle text messages and attachments
-            msg = evt.get("message", {})
-            print('msg:', msg)
-            
-            history = add_to_history(history, msg, sender)
-            if not history and not msg:
-                breaker = True
-                break
-            # Send typing indicators
-            send_action(sender, "mark_seen")
-            send_action(sender, "typing_on")
-
-            # Get AI response
-            reply = ai_reply(history[-30:])  # Keep last 30 messages for context
-            print(reply)
-            
-            send_action(sender, "typing_off")
-
-            # Send responses
-            success = True
-            for r in reply:
-                if not send_text(sender, r):
-                    success = False
-                    continue
-                history.append({"role": "assistant", "content": r.get("text", str(r))})
-
-            if success:
-                # Save conversation history
-                conversation.history = json.dumps(history)
-                conversation.save()
-            else:
-                logger.error(f"Failed to send all messages to {sender}")
-
-            # Handle postback buttons
-            postback = evt.get("postback")
-            if postback and postback.get("payload"):
-                payload = postback["payload"]
-                send_text(sender, {"text": f"You tapped: {payload}"})
-            
-        if breaker:
-            break
+        for event in entry.get("messaging", []):
+            try:
+                process_event(event)
+            except Exception as e:
+                # Catch errors in single event processing to not fail the whole batch
+                logger.error(f"Error processing event: {event}. Exception: {e}", exc_info=True)
 
     return JsonResponse({"status": "ok"})
