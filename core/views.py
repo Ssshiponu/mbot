@@ -12,7 +12,7 @@ from django.views.decorators.http import require_http_methods
 from google import genai
 from google.genai import types
 
-from .models import Conversation
+from .models import Conversation, APIKey
 from .sys_prompt import get_prompt
 
 # --- Setup and Configuration ---
@@ -23,6 +23,10 @@ PAGE_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN")
 APP_SECRET = os.getenv("FB_APP_SECRET")
 VERIFY_TOKEN = os.getenv("FB_VERIFY_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+MODELS = ["gemini-2.5-pro", "gemini-2.5-flash"]
+
+API_KEYS = [key.get_api_key() for key in APIKey.objects.all()]
 
 # --- Constants ---
 SEND_API_URL = "https://graph.facebook.com/v23.0/me/messages"
@@ -133,15 +137,15 @@ def verify_signature(request) -> bool:
 
 # --- AI Core Logic ---
 
-def ai_reply(history: list) -> list:
+def process_reply(history: list, model: str, api_key: str) -> list:
     """Generate AI response using Gemini API"""
     try:
-        client = genai.Client()
+        client = genai.Client(api_key=api_key)
         
         # Convert history to proper format for Gemini
 
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model=model,
             contents=str(history),
             config=types.GenerateContentConfig(
                 temperature=0.8,
@@ -166,7 +170,30 @@ def ai_reply(history: list) -> list:
     except Exception as e:
         logger.error(f"AI generation error: {e}")
         return []
+    
+def ai_reply(history: list) -> list:
+    # Try with Gemini API key first
+    if GEMINI_API_KEY:
+        for model in MODELS:
+            try:
+                response = process_reply(history, model, GEMINI_API_KEY)
+                if response:
+                    return response
+            except Exception as e:
+                print(f"Failed to get response from {model} using GEMINI_API_KEY(.env)")
 
+    # Fallback: try with other API keys
+    for model in MODELS:
+        for key in API_KEYS:
+            try:
+                response = process_reply(history, model, key)
+                if response:
+                    return response
+            except Exception as e:
+                print(f"Failed to get response from {model} using {key[:4]}...{key[-4:]}")
+
+    print("[FAIL] No valid response from any model/key")
+    return []
 
 # --- Main Webhook Logic ---
 
