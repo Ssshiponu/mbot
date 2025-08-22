@@ -24,10 +24,6 @@ APP_SECRET = os.getenv("FB_APP_SECRET")
 VERIFY_TOKEN = os.getenv("FB_VERIFY_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-MODELS = ["gemini-2.5-pro", "gemini-2.5-flash"]
-
-API_KEYS = [key.get_api_key() for key in APIKey.objects.all()]
-
 # --- Constants ---
 SEND_API_URL = "https://graph.facebook.com/v23.0/me/messages"
 
@@ -172,6 +168,10 @@ def process_reply(history: list, model: str, api_key: str) -> list:
         return []
     
 def ai_reply(history: list) -> list:
+    
+    MODELS = ["gemini-2.5-pro", "gemini-2.5-flash"]
+
+    API_KEYS = [key.get_api_key() for key in APIKey.objects.all()]
     # Try with Gemini API key first
     if GEMINI_API_KEY:
         for model in MODELS:
