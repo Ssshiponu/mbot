@@ -201,7 +201,7 @@ def process_event(event: dict):
     """Handles a single messaging event from the Facebook webhook."""
     sender_id = event.get("sender", {}).get("id")
     if not sender_id:
-        return
+        return False
 
     conversation = get_or_create_conversation(sender_id)
     history = json.loads(conversation.get_history() or "[]")
@@ -226,7 +226,7 @@ def process_event(event: dict):
 
     if not user_input_received:
         # Ignore events without user input (e.g., delivery receipts, read receipts)
-        return
+        return False
 
     # --- Generate and Send AI Response ---
     send_action(sender_id, "mark_seen")
@@ -255,6 +255,8 @@ def process_event(event: dict):
         failed_count = success.count(False)
         logger.error(f"Failed to send {failed_count} messages to {sender_id}")
 
+    return True
+
 
 @require_http_methods(["GET", "POST"])
 @csrf_exempt
@@ -281,12 +283,19 @@ def webhook_view(request):
         logger.error("Invalid JSON received in webhook request body.")
         return HttpResponse("Invalid JSON", status=400)
 
+    breaker = False
     for entry in data.get("entry", []):
+        if breaker:
+            print("\nbreaked\n")
+            break
+
         for event in entry.get("messaging", []):
             try:
-                process_event(event)
+                breaker = process_event(event)
+                break
             except Exception as e:
                 # Catch errors in single event processing to not fail the whole batch
                 logger.error(f"Error processing event: {event}. Exception: {e}", exc_info=True)
-
+                
+        
     return JsonResponse({"status": "ok"})
