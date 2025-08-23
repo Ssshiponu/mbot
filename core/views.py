@@ -63,7 +63,10 @@ def add_user_message_to_history(history: list, msg: dict) -> list | None:
                 logger.error("Unexpected attachment format from user")
                 user_text = f'>user sent an "{attachment_type}" can\'t be seen'
     else:
-        return None # Not a processable message type
+        return None
+    
+    if msg.get("reply_to"):
+        user_text = f'>user replied to a previous message'
 
     history.append({"role": "user", "content": user_text})
     logger.info(f"User {history[-1]}")
@@ -329,6 +332,7 @@ def webhook_view(request):
 
     try:
         data = json.loads(request.body.decode("utf-8"))
+        print(data)
     except json.JSONDecodeError:
         logger.error("Invalid JSON received in webhook request body.")
         return HttpResponse("Invalid JSON", status=400)
