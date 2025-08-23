@@ -1,10 +1,8 @@
 from django.db import models
 
 class SystemPrompt(models.Model):
-    custom_instructions = models.TextField()
-    custom_data = models.TextField()
-    base_prompt = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True)
+    name = models.CharField(max_length=255, unique=True)
+    prompt = models.TextField()
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

@@ -1,6 +1,7 @@
 import os
 from .models import SystemPrompt
 
+
 def get_prompt():
     prompt_parts = []
     prompts_dir = os.path.join(os.path.dirname(__file__), "..", "prompts")
@@ -8,9 +9,11 @@ def get_prompt():
 
     try:
         # Try from database
-        p = SystemPrompt.objects.first()
-        if p:
-            return f"{p.base_prompt}\n\n{p.custom_instructions}\n\n{p.custom_data}"
+        prompts = SystemPrompt.objects.all()
+        if prompts.exists():
+            for prompt in prompts:
+                prompt_parts.append(prompt.prompt.strip())
+            return "\n\n".join(prompt_parts)
 
         # Try from prompts directory
         if os.path.isdir(prompts_dir):
@@ -22,8 +25,9 @@ def get_prompt():
 
             if prompt_parts:
                 return "\n\n".join(prompt_parts)
-            else:
-                raise FileNotFoundError("No prompt files found in the prompts directory")
+
+        # If no prompts found at all
+        raise FileNotFoundError("No prompts found in database or prompts directory")
 
     except Exception as e:
         print(f"Error getting prompt: {e}")
