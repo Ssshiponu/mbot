@@ -1,7 +1,7 @@
 # admin.py
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Conversation
+from .models import Conversation, APIKey, SeytemPrompt
 import json
 
 @admin.register(Conversation)
@@ -96,3 +96,6 @@ class ConversationAdmin(admin.ModelAdmin):
         except (json.JSONDecodeError, TypeError):
             return "Invalid JSON format"
     formatted_conversation.short_description = 'Conversation Table'
+    
+admin.site.register(APIKey)
+admin.site.register(SeytemPrompt)
