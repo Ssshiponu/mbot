@@ -10,6 +10,9 @@ class SystemPrompt(models.Model):
         verbose_name_plural = 'System Prompts'
         ordering = ['-updated_at']
         
+    def __str__(self):
+        return self.name
+        
 class APIKey(models.Model):
     name = models.CharField(max_length=255, unique=True)
     api_key = models.CharField(max_length=255)
