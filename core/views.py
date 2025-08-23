@@ -144,15 +144,13 @@ def verify_signature(request) -> bool:
 # --- AI Core Logic ---
 def process_media(media_url: str, prompt: str = "Describe this media content in less.") -> str:
 
-    # Guess the mime type based on file extension
-    mime_type, _ = mimetypes.guess_type(media_url)
-    if not mime_type:
-        logger.error(f"Failed to guess mime type for {media_url}")
-        return None
-
-    # Download the media file
-    resp = requests.get(media_url)
+    resp = requests.get(media_url, timeout=15)
     resp.raise_for_status()
+    mime_type = resp.headers.get("Content-Type") or mimetypes.guess_type(media_url)[0]
+    if not mime_type:
+        logger.warning(f"Falling back to 'application/octet-stream' for {media_url}")
+        mime_type = "application/octet-stream"
+
     media_bytes = resp.content
 
     # Wrap the file as Gemini part
@@ -236,11 +234,24 @@ def ai_reply(history: list) -> list:
 
 # --- Main Webhook Logic ---
 
+PROCESSED_MIDS = set()
+
 def process_event(event: dict):
-    """Handles a single messaging event from the Facebook webhook."""
     sender_id = event.get("sender", {}).get("id")
     if not sender_id:
         return False
+
+    msg = event.get("message", {})
+    if msg.get("is_echo"):
+        logger.info("Ignoring echo message.")
+        return False
+
+    mid = msg.get("mid")
+    if mid and mid in PROCESSED_MIDS:
+        logger.info(f"Ignoring duplicate mid {mid}")
+        return False
+    if mid:
+        PROCESSED_MIDS.add(mid)
 
     conversation = get_or_create_conversation(sender_id)
     history = json.loads(conversation.get_history() or "[]")
@@ -322,16 +333,10 @@ def webhook_view(request):
         logger.error("Invalid JSON received in webhook request body.")
         return HttpResponse("Invalid JSON", status=400)
 
-    breaker = False
     for entry in data.get("entry", []):
-        if breaker:
-            logger.warning("More than one entry found in webhook request. Processing only the first one.")
-            break
-
         for event in entry.get("messaging", []):
             try:
-                breaker = process_event(event)
-                break
+                process_event(event)
             except Exception as e:
                 # Catch errors in single event processing to not fail the whole batch
                 logger.error(f"Error processing event: {event}. Exception: {e}", exc_info=True)
