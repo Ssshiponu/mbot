@@ -1,6 +1,6 @@
 from django.db import models
 
-class SeytemPrompt(models.Model):
+class SystemPrompt(models.Model):
     custom_instructions = models.TextField()
     custom_data = models.TextField()
     base_prompt = models.TextField()
