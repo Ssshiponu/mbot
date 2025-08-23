@@ -4,6 +4,7 @@ import os
 import hmac
 import hashlib
 import requests
+import mimetypes
 
 from django.http import HttpResponse, JsonResponse, HttpResponseForbidden
 from django.views.decorators.csrf import csrf_exempt
@@ -16,6 +17,8 @@ from .models import Conversation, APIKey
 from .sys_prompt import get_prompt
 
 # --- Setup and Configuration ---
+logging.basicConfig(level=logging.DEBUG,
+                    filename='mbot.log',)
 logger = logging.getLogger(__name__)
 
 # --- Environment Variables ---
@@ -49,9 +52,16 @@ def add_user_message_to_history(history: list, msg: dict) -> list | None:
         payload = attachment.get("payload", {})
         
         if payload.get("sticker_id") == 369239263222822: # Thumbs-up sticker
-             user_text = ">thumbsup sticker"
+            user_text = ">thumbsup sticker"
         else:
-             user_text = f'>user sent an "{attachment_type}"'
+            try:
+                url = payload["url"]
+                attachment_content = process_media(str(url))
+                user_text = f'>user sent an "{attachment_type}" which may have: {attachment_content}'
+            except KeyError:
+                # Fallback for unexpected format from user
+                logger.error("Unexpected attachment format from user")
+                user_text = f'>user sent an "{attachment_type}" can\'t be seen'
     else:
         return None # Not a processable message type
 
@@ -132,6 +142,35 @@ def verify_signature(request) -> bool:
 
 
 # --- AI Core Logic ---
+def process_media(media_url: str, prompt: str = "Describe this media content in less.") -> str:
+
+    # Guess the mime type based on file extension
+    mime_type, _ = mimetypes.guess_type(media_url)
+    if not mime_type:
+        logger.error(f"Failed to guess mime type for {media_url}")
+        return None
+
+    # Download the media file
+    resp = requests.get(media_url)
+    resp.raise_for_status()
+    media_bytes = resp.content
+
+    # Wrap the file as Gemini part
+    media_part = types.Part.from_bytes(
+        data=media_bytes,
+        mime_type=mime_type
+    )
+
+    # Create Gemini client
+    client = genai.Client()
+
+    # Send request
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=[media_part, prompt],
+    )
+
+    return response.text.strip()
 
 def process_reply(history: list, model: str, api_key: str) -> list:
     """Generate AI response using Gemini API"""
@@ -286,7 +325,7 @@ def webhook_view(request):
     breaker = False
     for entry in data.get("entry", []):
         if breaker:
-            print("\nbreaked\n")
+            logger.warning("More than one entry found in webhook request. Processing only the first one.")
             break
 
         for event in entry.get("messaging", []):
