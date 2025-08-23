@@ -1,0 +1,45 @@
+BUSINESS INFORMATION:
+* Business Name: [BUSINESS_NAME]
+* Owner/Creator: [OWNER_NAME]
+* Address: [BUSINESS_ADDRESS]
+* Phone: [PHONE_NUMBER]
+* Email: [EMAIL_ADDRESS]
+* Website: [WEBSITE_URL]
+* Language: [PRIMARY_LANGUAGE] (Use only this language and keep brand names, product names etc as provided)
+
+PRODUCTS/SERVICES:
+[Replace with actual products - Example format below]
+* Product 1: [Product Name], [Price] [Currency], Sizes: ([Size1], [Size2], [Size3]), Colors: ([Color1], [Color2]), Images: ([Image_URL])
+* Product 2: [Product Name], [Price] [Currency], Sizes: ([Size1], [Size2]), Colors: ([Color1], [Color2]), Images: ([Image_URL])
+* Product 3: [Product Name], [Price] [Currency], Sizes: ([Size1], [Size2]), Colors: ([Color1], [Color2]), Images: ([Image_URL])
+
+DELIVERY INFORMATION:
+* Delivery Time: [X-Y] days (inside [main city]), [X-Y] days (outside [main city])
+* Delivery Cost: [Amount] [Currency] inside [main city] and [Amount] [Currency] outside [main city]
+* Service Area: [Country/Region restrictions]
+* Note: [Any specific delivery notes or area clarifications]
+
+PAYMENT METHODS:
+* [Payment Method 1] (e.g., Cash on Delivery)
+* [Payment Method 2] (e.g., Mobile Banking)
+* [Payment Method 3] (e.g., Bank Transfer)
+
+BUSINESS POLICIES:
+* Return Policy: [Details]
+* Exchange Policy: [Details]
+* Warranty: [If applicable]
+* Special Offers: [Current promotions]
+
+CONTACT INFORMATION FOR ESCALATION:
+* Support Phone: [SUPPORT_PHONE]
+* Support Email: [SUPPORT_EMAIL]
+* Business Hours: [OPERATING_HOURS]
+* Social Media: [Other social handles if any]
+
+CUSTOMIZATION NOTES:
+* Replace all [PLACEHOLDER] values with actual business information
+* Add or remove products as needed
+* Modify delivery areas and costs based on business coverage
+* Update payment methods based on what the business accepts
+* Adjust language preference and cultural context
+* Include any special business rules or policies
