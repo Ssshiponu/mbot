@@ -70,7 +70,7 @@ def add_user_message_to_history(history: list, msg: dict) -> list | None:
 
     history.append({"role": "user", "content": user_text})
     logger.info(f"User {history[-1]}")
-    print(f"User {history[-1]}")
+    logger.info(f"User: {history[-1]['content']}")
     return history
 
 def add_model_message_to_history(history: list, model_responses: list) -> list:
@@ -91,7 +91,7 @@ def add_model_message_to_history(history: list, model_responses: list) -> list:
             content = json.dumps(res_part)
 
         history.append({"role": "assistant", "content": content})
-        print(f"Model {history[-1]}")
+        logger.info(f"User: {history[-1]['content']}")
     return history
 
 
@@ -246,7 +246,7 @@ def ai_reply(history: list) -> list:
                 if response:
                     return response
             except Exception as e:
-                print(f"Failed to get response from {model} using GEMINI_API_KEY(.env)")
+                logger.error(f"Failed to get response from {model} using GEMINI_API_KEY(.env)")
 
     # Fallback: try with other API keys
     for model in MODELS:
@@ -256,9 +256,9 @@ def ai_reply(history: list) -> list:
                 if response:
                     return response
             except Exception as e:
-                print(f"Failed to get response from {model} using {key[:4]}...{key[-4:]}")
+                logger.error(f"Failed to get response from {model} using {key[:4]}...{key[-4:]}")
 
-    print("[FAIL] No valid response from any model/key")
+    logger.error("[FAIL] No valid response from any model/key")
     return []
 
 # --- Main Webhook Logic ---
@@ -321,7 +321,7 @@ def process_event(event: dict):
     success = []
     for res_part in model_responses:
         if not send_message(sender_id, res_part):
-            print(f"Failed to send message: {res_part}")
+            logger.error(f"Failed to send message to {sender_id}")
             success.append(False)
         else:
             success.append(True)
@@ -358,7 +358,6 @@ def webhook_view(request):
 
     try:
         data = json.loads(request.body.decode("utf-8"))
-        print(data)
     except json.JSONDecodeError:
         logger.error("Invalid JSON received in webhook request body.")
         return HttpResponse("Invalid JSON", status=400)
