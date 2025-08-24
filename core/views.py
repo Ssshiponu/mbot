@@ -13,7 +13,7 @@ from django.views.decorators.http import require_http_methods
 from google import genai
 from google.genai import types
 
-from .models import Conversation, APIKey
+from .models import Conversation, APIKey, Config
 from .sys_prompt import get_prompt
 
 # --- Setup and Configuration ---
@@ -145,6 +145,31 @@ def verify_signature(request) -> bool:
 
 
 # --- AI Core Logic ---
+def get_thinking_budget(history: list, model: str) -> int:
+    if not history:
+        if model == "gemini-2.5-pro":
+            return 128
+        if model == "gemini-2.5-flash":
+            return 0
+        return -1  # let the model decide
+
+    config = Config.objects.filter(name="thinking_budget").first()
+
+    if not config:    
+        logger.warning("thinking_budget config not found. Using default value.")
+        return -1
+
+    try:
+        budget = int(config.value)
+    except (ValueError, TypeError):
+        logger.warning("Invalid value for thinking_budget config. Using default value.")
+        return -1 
+
+    if budget < 0:
+        return -1
+    return max(128, min(budget, 4096))
+   
+
 def process_media(media_url: str, prompt: str = "Describe this media content in less.") -> str:
 
     resp = requests.get(media_url, timeout=15)
@@ -187,6 +212,7 @@ def process_reply(history: list, model: str, api_key: str) -> list:
                 temperature=0.8,
                 system_instruction=get_prompt(),
                 response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(thinking_budget=get_thinking_budget(history, model),),
             ),
         )
         

@@ -47,3 +47,16 @@ class Conversation(models.Model):
 
     def __str__(self):
         return self.sender_id
+    
+class Config(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+    value = models.TextField()
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = 'Config'
+        verbose_name_plural = 'Configs'
+        ordering = ['-updated_at']
+        
+    def __str__(self):
+        return self.name
