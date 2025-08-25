@@ -69,7 +69,6 @@ def add_user_message_to_history(history: list, msg: dict) -> list | None:
         user_text = f'>user replied to a previous message'
 
     history.append({"role": "user", "content": user_text})
-    logger.info(f"User {history[-1]}")
     logger.info(f"User: {history[-1]['content']}")
     return history
 
@@ -91,7 +90,7 @@ def add_model_message_to_history(history: list, model_responses: list) -> list:
             content = json.dumps(res_part)
 
         history.append({"role": "assistant", "content": content})
-        logger.info(f"User: {history[-1]['content']}")
+        logger.info(f"Model: {history[-1]['content']}")
     return history
 
 

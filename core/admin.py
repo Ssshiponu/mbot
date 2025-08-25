@@ -1,7 +1,7 @@
 # admin.py
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Conversation, APIKey, SystemPrompt
+from .models import Conversation, APIKey, SystemPrompt, Config
 import json
 
 @admin.register(Conversation)
@@ -99,3 +99,4 @@ class ConversationAdmin(admin.ModelAdmin):
     
 admin.site.register(APIKey)
 admin.site.register(SystemPrompt)
+admin.site.register(Config)
