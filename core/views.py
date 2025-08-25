@@ -167,6 +167,17 @@ def get_thinking_budget(history: list, model: str) -> int:
     if budget < 0:
         return -1
     return max(128, min(budget, 4096))
+
+def get_temperature():
+    config = Config.objects.filter(name="temperature").first()
+    if not config:
+        logger.warning("temperature config not found. Using default value.")
+        return 0.7
+    try:
+        return float(config.value.strip()) if config.value is not None else 0.7
+    except (ValueError, TypeError):
+        logger.warning("Invalid value for temperature config. Using default value.")
+        return 0.7
    
 
 def process_media(media_url: str, prompt: str = "Describe this media content in less.") -> str:
@@ -208,7 +219,7 @@ def process_reply(history: list, model: str, api_key: str) -> list:
             model=model,
             contents=str(history),
             config=types.GenerateContentConfig(
-                temperature=0.8,
+                temperature=get_temperature(),
                 system_instruction=get_prompt(),
                 response_mime_type="application/json",
                 thinking_config=types.ThinkingConfig(thinking_budget=get_thinking_budget(history, model),),
