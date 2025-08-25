@@ -184,26 +184,16 @@ def process_media(media_url: str, prompt: str = "Describe this media content in 
 
     resp = requests.get(media_url, timeout=15)
     resp.raise_for_status()
-    mime_type = resp.headers.get("Content-Type") or mimetypes.guess_type(media_url)[0]
-    if not mime_type:
-        logger.warning(f"Falling back to 'application/octet-stream' for {media_url}")
-        mime_type = "application/octet-stream"
-
-    media_bytes = resp.content
-
-    # Wrap the file as Gemini part
-    media_part = types.Part.from_bytes(
-        data=media_bytes,
-        mime_type=mime_type
-    )
 
     # Create Gemini client
     client = genai.Client()
+    
+    media = client.files.upload(resp)
 
     # Send request
     response = client.models.generate_content(
         model="gemini-2.5-flash",
-        contents=[media_part, prompt],
+        contents=[media, prompt],
     )
 
     return response.text.strip()
@@ -297,6 +287,8 @@ def process_event(event: dict):
     
     user_input_received = False
     
+    send_action(sender_id, "mark_seen")
+    
     # Case 1: User sent a standard message (text, attachment)
     if "message" in event:
         updated_history = add_user_message_to_history(history, event["message"])
@@ -318,7 +310,6 @@ def process_event(event: dict):
         return False
 
     # --- Generate and Send AI Response ---
-    send_action(sender_id, "mark_seen")
     send_action(sender_id, "typing_on")
 
     remember_count = int(get_config('remember', 20))
