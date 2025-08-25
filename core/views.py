@@ -167,17 +167,17 @@ def get_thinking_budget(history: list, model: str) -> int:
     if budget < 0:
         return -1
     return max(128, min(budget, 4096))
-
-def get_temperature():
-    config = Config.objects.filter(name="temperature").first()
+    
+def get_config(name, default):
+    config = Config.objects.filter(name=name).first()
     if not config:
-        logger.warning("temperature config not found. Using default value.")
-        return 0.7
+        logger.warning(f"{name} config not found. Using default value.")
+        return default
     try:
-        return float(config.value.strip()) if config.value is not None else 0.7
+        return config.value.strip() if config.value is not None else default
     except (ValueError, TypeError):
-        logger.warning("Invalid value for temperature config. Using default value.")
-        return 0.7
+        logger.warning(f"Invalid value for {name} config. Using default value.")
+        return default
    
 
 def process_media(media_url: str, prompt: str = "Describe this media content in less.") -> str:
@@ -219,7 +219,7 @@ def process_reply(history: list, model: str, api_key: str) -> list:
             model=model,
             contents=str(history),
             config=types.GenerateContentConfig(
-                temperature=get_temperature(),
+                temperature=float(get_config('temperature', 1.0)),
                 system_instruction=get_prompt(),
                 response_mime_type="application/json",
                 thinking_config=types.ThinkingConfig(thinking_budget=get_thinking_budget(history, model),),
@@ -321,8 +321,8 @@ def process_event(event: dict):
     send_action(sender_id, "mark_seen")
     send_action(sender_id, "typing_on")
 
-    # Get AI response, keeping context to the last 15 turns (30 messages)
-    model_responses = ai_reply(history[-30:])
+    remember_count = int(get_config('remember', 20))
+    model_responses = ai_reply(history[-remember_count:])
     
     send_action(sender_id, "typing_off")
 
